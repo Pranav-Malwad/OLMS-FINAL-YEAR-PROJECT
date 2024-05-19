@@ -7,12 +7,13 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Students = require("./models/Students");
 const Instructor = require("./models/Instructor");
-const Course = require("./models/Courses"); // Corrected model name
+const Course = require("./models/Courses");
 const cloudinary = require("cloudinary").v2;
 const Lecture = require("./models/Lectures");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
 const Student = require("./models/Students");
+
 const app = express();
 
 app.use(express.json());
@@ -144,7 +145,7 @@ app.post("/register", async (req, res) => {
     // Save the new user to the database
     await newUser.save();
 
-    res.status(201).json({ message: "Registered successfully!" });
+    res.status(201).json({ mesfsage: "Registered successfully!" });
   } catch (error) {
     console.error("Error registering user:", error);
     res
@@ -173,6 +174,7 @@ app.post("/login", async (req, res) => {
     }
 
     // Generate a JWT token
+    // this is jwt token 
     const token = jwt.sign({ userId: user._id, email }, secretKey, {
       expiresIn: "7d",
     });
@@ -217,9 +219,10 @@ app.get("/instructor-profile", verifyToken, async (req, res) => {
   try {
     const instructorId = req.user.userId;
 
-    const instructor = await Instructor.findById(instructorId).select(
-      "-password"
-    );
+    // const instructor = await Instructor.findById(instructorId).select(
+    //   "-password"
+    // );
+    const instructor = await Instructor.findById(instructorId);
 
     if (!instructor) {
       return res.status(404).json({ error: "Instructor profile not found" });
@@ -275,6 +278,12 @@ app.put("/update-instructor-profile", verifyToken, async (req, res) => {
   try {
     const instructorId = req.user.userId;
     const updatedFields = req.body;
+
+    const hashedPassword = await bcrypt.hash(updatedFields.password, 10);
+
+    // Update the password field in updatedFields with the hashed password
+    updatedFields.password = hashedPassword;
+
 
     const instructor = await Instructor.findByIdAndUpdate(
       instructorId,
@@ -500,6 +509,41 @@ app.get("/course-details/:courseId", async (req, res) => {
   }
 });
 
+app.get("/student/course-details/:courseId", async (req, res) => {
+  const { courseId } = req.params;
+  try {
+    // Fetch all lectures for the specified course
+    const lectures = await Lecture.find({ course: courseId });
+
+    if (!lectures || lectures.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No lectures found for this course" });
+    }
+
+    // Group lectures by section
+    const lecturesBySection = {};
+    lectures.forEach((lecture) => {
+      const sectionName = lecture.section || "Uncategorized";
+      if (!lecturesBySection[sectionName]) {
+        lecturesBySection[sectionName] = [];
+      }
+      lecturesBySection[sectionName].push(lecture);
+    });
+
+    // Convert object to array of sections
+    const sections = Object.keys(lecturesBySection).map((sectionName) => ({
+      name: sectionName,
+      lectures: lecturesBySection[sectionName],
+    }));
+
+    res.status(200).json({ sections });
+  } catch (error) {
+    console.error("Error fetching lectures:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Routes
 app.get("/auth/student-home", async (req, res) => {
   try {
@@ -515,7 +559,7 @@ app.get("/", async (req, res) => {
   try {
     const courses = await Course.find();
     res.json(courses);
-    console.log(courses);
+    // console.log(courses);
   } catch (error) {
     console.error("Error fetching courses:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -527,7 +571,7 @@ app.post("/send-email", (req, res) => {
 
   // Create a transporter object using the default SMTP transport
   let transporter = nodemailer.createTransport({
-    /* 
+    /*
       Configure your email transport settings here.
       For example, for Gmail, you can use the following:
       */
@@ -587,14 +631,22 @@ const otpStorage = {};
 
 // Endpoint to handle sending OTP
 app.post("/send-otp", async (req, res) => {
-  const { email } = req.body;
+  const { email,userType } = req.body;
 
   try {
     // Check if the email exists in the database
-    const student = await Student.findOne({ email });
-    if (!student) {
-      return res.status(404).json({ message: "student not found." });
+    const user = await (userType === "student"
+      ? Students.findOne({ email })
+      : Instructor.findOne({ email }));
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid credentials" });
     }
+    // our preveous code only for the student
+    // const student = await Student.findOne({ email });
+    // if (!student) {
+    //   return res.status(404).json({ message: "student not found." });
+    // }
 
     // Generate a 4-digit code
     const otp = randomize("0", 4);
@@ -628,14 +680,21 @@ app.post("/send-otp", async (req, res) => {
 
 // Assuming this is the correct route for handling OTP verification
 app.post("/verify-otp", async (req, res) => {
-  const { email, otp, newPassword } = req.body;
+  const { email, otp, newPassword,userType } = req.body;
 
   try {
-    // Find the user by email
-    const student = await Student.findOne({ email });
-    if (!student) {
-      return res.status(404).json({ message: "User not found." });
+    const user = await (userType === "student"
+      ? Students.findOne({ email })
+      : Instructor.findOne({ email }));
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid credentials" });
     }
+    // Find the user by email  // thsi is our previous code only for the student 
+    // const student = await Student.findOne({ email });
+    // if (!student) {
+    //   return res.status(404).json({ message: "User not found." });
+    // }
 
     // Retrieve the OTP from temporary storage
     const storedOtp = otpStorage[email];
@@ -654,9 +713,10 @@ app.post("/verify-otp", async (req, res) => {
 
     // Update the user's password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    student.password = hashedPassword;
+    user.password = hashedPassword;
 
-    await student.save();
+    // await student.save();
+      await user.save();
 
     // For demonstration purposes, we'll just send a success message
     res.json({ message: "Password reset successful." });
@@ -738,12 +798,55 @@ app.delete("/course-details/:lectureId", async (req, res) => {
 
     // Delete the lecture
     await Lecture.findByIdAndDelete(lectureId);
-    console.log(lectureId);
+    // console.log(lectureId);
 
     res.status(200).json({ message: "Lecture deleted successfully" });
   } catch (error) {
     console.error("Error deleting lecture:", error.message);
     res.status(500).json({ error: "Failed to delete lecture" });
+  }
+});
+
+// Route to create a Checkout Session
+
+app.get("/search/:query", async (req, res) => {
+  try {
+    const query = req.params.query; // Access the route parameter
+
+    const regex = new RegExp(query, "i"); // Case-insensitive search
+    const searchResults = await Course.find({ title: regex });
+
+    res.json({ results: searchResults });
+  } catch (error) {
+    console.error("Error fetching search results:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.put("/courses/:id", async (req, res) => {
+  try {
+    const updatedCourse = await Course.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true }
+    );
+    res.json(updatedCourse);
+  } catch (error) {
+    console.error("Error updating course:", error);
+    res.status(500).json({ message: "Failed to update course" });
+  }
+});
+
+app.get("/courses/:id", async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ message: "Course not found" });
+    }
+    res.json(course);
+  } catch (error) {
+    console.error("Error fetching course:", error);
+    res.status(500).json({ message: "Failed to fetch course" });
   }
 });
 
